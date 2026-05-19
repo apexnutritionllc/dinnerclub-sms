@@ -1,0 +1,45 @@
+from flask import Flask, request, jsonify
+import re, os
+
+app = Flask(__name__)
+PHONE_FILE = "phones.txt"
+
+def clean_phone(raw, country="1"):
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 10:
+        digits = country + digits
+    return "+" + digits
+
+@app.route("/new-member", methods=["POST"])
+def new_member():
+    data = request.json or {}
+    member = data.get("member", {})
+    raw_phone = member.get("phone", "")
+    if not raw_phone:
+        return jsonify({"error": "no phone"}), 400
+    phone = clean_phone(raw_phone)
+    existing = set()
+    if os.path.exists(PHONE_FILE):
+        with open(PHONE_FILE) as f:
+            existing = set(line.strip() for line in f)
+    if phone not in existing:
+        with open(PHONE_FILE, "a") as f:
+            f.write(phone + "\n")
+    return jsonify({"status": "added", "phone": phone}), 200
+
+@app.route("/unsubscribe", methods=["POST"])
+def unsubscribe():
+    # Twilio sends STOP replies here
+    from_number = request.form.get("From", "")
+    if not from_number:
+        return "", 200
+    if os.path.exists(PHONE_FILE):
+        with open(PHONE_FILE) as f:
+            lines = [line.strip() for line in f if line.strip()]
+        lines = [l for l in lines if l != from_number]
+        with open(PHONE_FILE, "w") as f:
+            f.write("\n".join(lines) + "\n")
+    return "", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
