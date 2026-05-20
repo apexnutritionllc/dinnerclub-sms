@@ -17,6 +17,10 @@ def new_member():
     raw_phone = member.get("phone", "")
     if not raw_phone:
         return jsonify({"error": "no phone"}), 400
+    offer = data.get("offer", {}).get("title", "")
+    allowed_offers = ["Monthly Membership. KBK Dinner Club", "Yearly Membership - KBK Dinner Club."]
+    if not any(o in offer for o in allowed_offers):
+        return jsonify({"status": "skipped", "reason": "wrong offer"}), 200
     phone = clean_phone(raw_phone)
     existing = set()
     if os.path.exists(PHONE_FILE):
@@ -29,7 +33,6 @@ def new_member():
 
 @app.route("/unsubscribe", methods=["POST"])
 def unsubscribe():
-    # Twilio sends STOP replies here
     from_number = request.form.get("From", "")
     if not from_number:
         return "", 200
