@@ -1,8 +1,23 @@
 from flask import Flask, request, jsonify
-import re, os
+import re, os, psycopg2
 
 app = Flask(__name__)
-PHONE_FILE = "phones.txt"
+
+def get_db():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS recipients (
+            phone TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def clean_phone(raw, country="1"):
     digits = re.sub(r"\D", "", raw)
@@ -18,17 +33,16 @@ def new_member():
     if not raw_phone:
         return jsonify({"error": "no phone"}), 400
     offer = data.get("offer", {}).get("title", "")
-    allowed_offers = ["Monthly Membership. KBK Dinner Club", "Yearly Membership - KBK Dinner Club."]
+    allowed_offers = ["Monthly Membership. KBK Dinner Club", "Yearly Membership - KBK Dinner Club"]
     if not any(o in offer for o in allowed_offers):
         return jsonify({"status": "skipped", "reason": "wrong offer"}), 200
     phone = clean_phone(raw_phone)
-    existing = set()
-    if os.path.exists(PHONE_FILE):
-        with open(PHONE_FILE) as f:
-            existing = set(line.strip() for line in f)
-    if phone not in existing:
-        with open(PHONE_FILE, "a") as f:
-            f.write(phone + "\n")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO recipients (phone) VALUES (%s) ON CONFLICT DO NOTHING", (phone,))
+    conn.commit()
+    cur.close()
+    conn.close()
     return jsonify({"status": "added", "phone": phone}), 200
 
 @app.route("/unsubscribe", methods=["POST"])
@@ -36,13 +50,16 @@ def unsubscribe():
     from_number = request.form.get("From", "")
     if not from_number:
         return "", 200
-    if os.path.exists(PHONE_FILE):
-        with open(PHONE_FILE) as f:
-            lines = [line.strip() for line in f if line.strip()]
-        lines = [l for l in lines if l != from_number]
-        with open(PHONE_FILE, "w") as f:
-            f.write("\n".join(lines) + "\n")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM recipients WHERE phone = %s", (from_number,))
+    conn.commit()
+    cur.close()
+    conn.close()
     return "", 200
+
+with app.app_context():
+    init_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
